@@ -157,3 +157,109 @@ func TestLedgerRecordsActualUsageAndBudgetCharges(t *testing.T) {
 		t.Errorf("App B budget usage = %+v, want %+v", got, wantB)
 	}
 }
+func TestLedgerRecordWithBudgetUsesPreviousCharges(t *testing.T) {
+	ledger := NewLedger(time.UTC)
+	start := time.Date(2026, time.November, 27, 15, 0, 0, 0, time.UTC)
+	firstEnd := start.Add(8 * time.Minute)
+	secondEnd := firstEnd.Add(9 * time.Minute)
+
+	limits := DailyLimits{Shared: 5 * time.Minute}
+	bonus := AppBonusAllowance{
+		AppID:     "app-a",
+		Granted:   10 * time.Minute,
+		ExpiresAt: time.Date(2026, time.November, 28, 0, 0, 0, 0, time.UTC),
+	}
+
+	first := ledger.RecordWithBudget("child-a", "app-a", start, firstEnd, limits, bonus)
+	wantFirst := Allocation{
+		Actual:   8 * time.Minute,
+		Regular:  5 * time.Minute,
+		AppBonus: 3 * time.Minute,
+	}
+	if first != wantFirst {
+		t.Errorf("first allocation = %+v, want %+v", first, wantFirst)
+	}
+
+	second := ledger.RecordWithBudget("child-a", "app-a", firstEnd, secondEnd, limits, bonus)
+	wantSecond := Allocation{
+		Actual:   9 * time.Minute,
+		AppBonus: 7 * time.Minute,
+	}
+	if second != wantSecond {
+		t.Errorf("second allocation = %+v, want %+v", second, wantSecond)
+	}
+
+	sharedActual, appActual := ledger.Totals("child-a", "app-a", start)
+	if sharedActual != 17*time.Minute || appActual != 17*time.Minute {
+		t.Errorf("actual usage = (%s, %s), want (17m, 17m)", sharedActual, appActual)
+	}
+
+	wantCharges := BudgetUsage{
+		SharedRegular: 5 * time.Minute,
+		AppRegular:    5 * time.Minute,
+		AppBonus:      10 * time.Minute,
+	}
+	if got := ledger.BudgetTotals("child-a", "app-a", start); got != wantCharges {
+		t.Errorf("budget usage = %+v, want %+v", got, wantCharges)
+	}
+}
+func TestLedgerRecordWithBudgetKeepsAppAndDayLimitsSeparate(t *testing.T) {
+	local := time.FixedZone("UTC+1", 60*60)
+	ledger := NewLedger(local)
+	midnight := time.Date(2026, time.November, 28, 0, 0, 0, 0, local)
+	start := midnight.Add(-30 * time.Minute).UTC()
+
+	appLimit := 2 * time.Minute
+	limitsA := DailyLimits{Shared: 10 * time.Minute, App: &appLimit}
+	limitsB := DailyLimits{Shared: 10 * time.Minute}
+	bonusA := AppBonusAllowance{
+		AppID:     "app-a",
+		Granted:   5 * time.Minute,
+		ExpiresAt: midnight,
+	}
+
+	tests := []struct {
+		name   string
+		appID  string
+		start  time.Time
+		length time.Duration
+		limits DailyLimits
+		want   Allocation
+	}{
+		{
+			name:   "app A uses bonus after its own limit",
+			appID:  "app-a",
+			start:  start,
+			length: 5 * time.Minute,
+			limits: limitsA,
+			want:   Allocation{Actual: 5 * time.Minute, Regular: 2 * time.Minute, AppBonus: 3 * time.Minute},
+		},
+		{
+			name:   "app B uses only the remaining shared time",
+			appID:  "app-b",
+			start:  start.Add(5 * time.Minute),
+			length: 9 * time.Minute,
+			limits: limitsB,
+			want:   Allocation{Actual: 9 * time.Minute, Regular: 8 * time.Minute},
+		},
+		{
+			name:   "next local day has fresh limits and no old bonus",
+			appID:  "app-a",
+			start:  midnight.UTC(),
+			length: 4 * time.Minute,
+			limits: limitsA,
+			want:   Allocation{Actual: 4 * time.Minute, Regular: 2 * time.Minute},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ledger.RecordWithBudget(
+				"child-a", tt.appID, tt.start, tt.start.Add(tt.length), tt.limits, bonusA,
+			)
+			if got != tt.want {
+				t.Errorf("RecordWithBudget = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

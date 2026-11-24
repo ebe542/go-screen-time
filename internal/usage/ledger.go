@@ -35,6 +35,20 @@ type BudgetUsage struct {
 	AppBonus      time.Duration
 }
 
+// DailyLimits defines the regular limits for one policy day.
+// A nil App limit means the app has no individual cap.
+type DailyLimits struct {
+	Shared time.Duration
+	App    *time.Duration
+}
+
+// AppBonusAllowance is the total bonus granted to an app for the selected child.
+type AppBonusAllowance struct {
+	AppID     string
+	Granted   time.Duration
+	ExpiresAt time.Time
+}
+
 // NewLedger creates a ledger with a non-nil policy time zone.
 func NewLedger(location *time.Location) *Ledger {
 	return &Ledger{
@@ -121,4 +135,33 @@ func (l *Ledger) BudgetTotals(childID, appID string, at time.Time) BudgetUsage {
 		AppRegular:    app.regular,
 		AppBonus:      app.bonus,
 	}
+}
+
+// RecordWithBudget allocates and records an interval within one local policy day.
+func (l *Ledger) RecordWithBudget(
+	childID, appID string,
+	start, end time.Time,
+	limits DailyLimits,
+	bonus AppBonusAllowance,
+) Allocation {
+	used := l.BudgetTotals(childID, appID, start)
+	regular := remainingTime(limits.Shared, used.SharedRegular)
+	if limits.App != nil {
+		regular = min(regular, remainingTime(*limits.App, used.AppRegular))
+	}
+
+	allocation := AllocateInterval(appID, start, end, regular, AppBonusGrant{
+		AppID:     bonus.AppID,
+		Remaining: remainingTime(bonus.Granted, used.AppBonus),
+		ExpiresAt: bonus.ExpiresAt,
+	})
+	l.RecordAllocation(childID, appID, start, allocation)
+	return allocation
+}
+
+func remainingTime(limit, used time.Duration) time.Duration {
+	if used >= limit {
+		return 0
+	}
+	return limit - used
 }
