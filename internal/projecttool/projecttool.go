@@ -1,3 +1,5 @@
+// Package projecttool implements the commands behind projectctl for project
+// checks, quality gates, and release automation.
 package projecttool
 
 import (
