@@ -130,3 +130,30 @@ func TestLedgerCountsElapsedTimeAcrossDST(t *testing.T) {
 		})
 	}
 }
+
+func TestLedgerRecordsActualUsageAndBudgetCharges(t *testing.T) {
+	ledger := NewLedger(time.UTC)
+	at := time.Date(2026, time.November, 27, 15, 0, 0, 0, time.UTC)
+	allocation := Allocate(8*time.Minute, 5*time.Minute, 10*time.Minute)
+
+	ledger.RecordAllocation("child-a", "app-a", at, allocation)
+
+	sharedActual, appActual := ledger.Totals("child-a", "app-a", at)
+	if sharedActual != 8*time.Minute || appActual != 8*time.Minute {
+		t.Errorf("actual usage = (%s, %s), want (8m, 8m)", sharedActual, appActual)
+	}
+
+	wantA := BudgetUsage{
+		SharedRegular: 5 * time.Minute,
+		AppRegular:    5 * time.Minute,
+		AppBonus:      3 * time.Minute,
+	}
+	if got := ledger.BudgetTotals("child-a", "app-a", at); got != wantA {
+		t.Errorf("App A budget usage = %+v, want %+v", got, wantA)
+	}
+
+	wantB := BudgetUsage{SharedRegular: 5 * time.Minute}
+	if got := ledger.BudgetTotals("child-a", "app-b", at); got != wantB {
+		t.Errorf("App B budget usage = %+v, want %+v", got, wantB)
+	}
+}

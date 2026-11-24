@@ -17,8 +17,22 @@ type dayKey struct {
 }
 
 type dayTotals struct {
-	shared time.Duration
-	byApp  map[string]time.Duration
+	shared        time.Duration
+	byApp         map[string]time.Duration
+	sharedRegular time.Duration
+	budgetByApp   map[string]appBudgetUsage
+}
+
+type appBudgetUsage struct {
+	regular time.Duration
+	bonus   time.Duration
+}
+
+// BudgetUsage reports the shared and per-app charges for one policy day.
+type BudgetUsage struct {
+	SharedRegular time.Duration
+	AppRegular    time.Duration
+	AppBonus      time.Duration
 }
 
 // NewLedger creates a ledger with a non-nil policy time zone.
@@ -45,7 +59,7 @@ func (l *Ledger) Record(childID, appID string, start, end time.Time) {
 	}
 }
 
-func (l *Ledger) addUsage(childID, appID string, at time.Time, elapsed time.Duration) {
+func (l *Ledger) addUsage(childID, appID string, at time.Time, elapsed time.Duration) *dayTotals {
 	key := l.keyFor(childID, at)
 	totals := l.days[key]
 	if totals == nil {
@@ -55,6 +69,7 @@ func (l *Ledger) addUsage(childID, appID string, at time.Time, elapsed time.Dura
 
 	totals.shared += elapsed
 	totals.byApp[appID] += elapsed
+	return totals
 }
 
 // Totals returns the child's shared usage and the selected app's usage for
@@ -71,4 +86,39 @@ func (l *Ledger) Totals(childID, appID string, at time.Time) (time.Duration, tim
 func (l *Ledger) keyFor(childID string, at time.Time) dayKey {
 	year, month, day := at.In(l.location).Date()
 	return dayKey{childID: childID, year: year, month: month, day: day}
+}
+
+// RecordAllocation records actual usage and charges within one local day.
+// The timestamp at identifies the policy day of the interval.
+func (l *Ledger) RecordAllocation(childID, appID string, at time.Time, allocation Allocation) {
+	if allocation.Actual <= 0 {
+		return
+	}
+
+	totals := l.addUsage(childID, appID, at, allocation.Actual)
+	totals.sharedRegular += allocation.Regular
+
+	if totals.budgetByApp == nil {
+		totals.budgetByApp = make(map[string]appBudgetUsage)
+	}
+
+	app := totals.budgetByApp[appID]
+	app.regular += allocation.Regular
+	app.bonus += allocation.AppBonus
+	totals.budgetByApp[appID] = app
+}
+
+// BudgetTotals returns the budget charges for the local day containing at.
+func (l *Ledger) BudgetTotals(childID, appID string, at time.Time) BudgetUsage {
+	totals := l.days[l.keyFor(childID, at)]
+	if totals == nil {
+		return BudgetUsage{}
+	}
+
+	app := totals.budgetByApp[appID]
+	return BudgetUsage{
+		SharedRegular: totals.sharedRegular,
+		AppRegular:    app.regular,
+		AppBonus:      app.bonus,
+	}
 }
