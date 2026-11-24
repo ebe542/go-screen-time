@@ -57,22 +57,6 @@ func NewLedger(location *time.Location) *Ledger {
 	}
 }
 
-// Record adds a foreground interval and splits it across local calendar days.
-func (l *Ledger) Record(childID, appID string, start, end time.Time) {
-	for start.Before(end) {
-		year, month, day := start.In(l.location).Date()
-		midnight := time.Date(year, month, day+1, 0, 0, 0, 0, l.location)
-
-		segmentEnd := end
-		if midnight.After(start) && midnight.Before(end) {
-			segmentEnd = midnight
-		}
-
-		l.addUsage(childID, appID, start, segmentEnd.Sub(start))
-		start = segmentEnd
-	}
-}
-
 func (l *Ledger) addUsage(childID, appID string, at time.Time, elapsed time.Duration) *dayTotals {
 	key := l.keyFor(childID, at)
 	totals := l.days[key]
@@ -164,4 +148,42 @@ func remainingTime(limit, used time.Duration) time.Duration {
 		return 0
 	}
 	return limit - used
+}
+
+// Record adds a foreground interval and splits it across local calendar days.
+func (l *Ledger) Record(childID, appID string, start, end time.Time) {
+	l.forEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
+		l.addUsage(childID, appID, segmentStart, segmentEnd.Sub(segmentStart))
+	})
+}
+
+// RecordAcrossDaysWithBudget records an interval using the limits and bonus
+// for each local day. budgetAt receives the segment start in the ledger's zone.
+func (l *Ledger) RecordAcrossDaysWithBudget(
+	childID, appID string,
+	start, end time.Time,
+	budgetAt func(at time.Time) (DailyLimits, AppBonusAllowance),
+) {
+	l.forEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
+		limits, bonus := budgetAt(segmentStart.In(l.location))
+		l.RecordWithBudget(childID, appID, segmentStart, segmentEnd, limits, bonus)
+	})
+}
+
+func (l *Ledger) forEachDaySegment(
+	start, end time.Time,
+	record func(start, end time.Time),
+) {
+	for start.Before(end) {
+		year, month, day := start.In(l.location).Date()
+		midnight := time.Date(year, month, day+1, 0, 0, 0, 0, l.location)
+
+		segmentEnd := end
+		if midnight.After(start) && midnight.Before(end) {
+			segmentEnd = midnight
+		}
+
+		record(start, segmentEnd)
+		start = segmentEnd
+	}
 }
