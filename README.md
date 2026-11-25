@@ -1,16 +1,17 @@
 # Windows 11 Screen Time
 
-A planned Go application that helps parents manage how long children use selected Windows 11 desktop programs and games. Each child has a separate policy tied to their Windows account. When a rule blocks a program, the child can continue using the Windows desktop and other apps.
+A Windows 11 parental control project written in Go. Each child has a policy tied to their Windows account. Parents allow specific programs and websites, with optional time limits. Unrestricted school and productivity tools stay available when media time runs out.
 
 ## Planned features
 
-- A shared daily budget for selected apps, with separate weekday and weekend settings.
-- Fixed hours for selected apps and individual daily limits per app or game.
+- A strict allowlist of programs and websites per child, with unrestricted and time-limited entries.
+- A shared daily media budget, with separate weekday and weekend settings.
+- Allowed hours and individual daily limits for time-limited programs and websites.
 - Required breaks after a configurable amount of use.
 - Bonus minutes granted directly in the parent menu or redeemed offline from a signed, encrypted message sent by a parent.
 - Separate usage history and limits for each child's Windows account.
 - A password-protected parent menu for managing rules, granting time and reviewing usage.
-- Automatic closure of blocked apps and enforcement on subsequent launches.
+- Enforcement of app restrictions and website restrictions in a managed browser.
 
 The project is at the design stage. The [specification](docs/specification.md) defines proposed defaults, the Windows enforcement design and acceptance criteria.
 

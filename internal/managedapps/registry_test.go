@@ -24,7 +24,7 @@ func TestRegistryMatchesAppsWithinChildProfile(t *testing.T) {
 				{
 					ID:              "example-game",
 					ExecutablePaths: []string{gamePath, launcherPath},
-					Policy: policy.AppAccessPolicy{
+					Policy: &policy.AppAccessPolicy{
 						AppLimit: &policy.AppDailyLimit{Limit: 30 * time.Minute},
 					},
 				},
@@ -36,7 +36,7 @@ func TestRegistryMatchesAppsWithinChildProfile(t *testing.T) {
 				{
 					ID:              "example-game",
 					ExecutablePaths: []string{gamePath},
-					Policy: policy.AppAccessPolicy{
+					Policy: &policy.AppAccessPolicy{
 						AppLimit: &policy.AppDailyLimit{Limit: time.Hour},
 					},
 				},
@@ -77,8 +77,8 @@ func TestRegistryMatchesAppsWithinChildProfile(t *testing.T) {
 			if got.ChildID != tt.sid || got.AppID != "example-game" {
 				t.Errorf("matched child and app = (%q, %q)", got.ChildID, got.AppID)
 			}
-			if got.Policy.AppLimit == nil || got.Policy.AppLimit.Limit != tt.limit {
-				t.Errorf("matched app limit = %+v, want %s", got.Policy.AppLimit, tt.limit)
+			if got.Policy == nil || got.Policy.AppLimit == nil || got.Policy.AppLimit.Limit != tt.limit {
+				t.Errorf("matched policy = %+v, want app limit %s", got.Policy, tt.limit)
 			}
 		})
 	}

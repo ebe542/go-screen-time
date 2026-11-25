@@ -10,9 +10,10 @@ import (
 type AccessDecision string
 
 const (
-	AccessAllowed   AccessDecision = "allowed"
-	AccessBlocked   AccessDecision = "blocked"
-	AccessUnmanaged AccessDecision = "unmanaged"
+	AccessAllowed        AccessDecision = "allowed"
+	AccessBlocked        AccessDecision = "blocked"
+	AccessNotAllowlisted AccessDecision = "not_allowlisted"
+	AccessUnmanaged      AccessDecision = "unmanaged"
 )
 
 // AccessStore evaluates a managed app against its usage and bonus state.
@@ -25,23 +26,30 @@ type AccessStore interface {
 	) (bool, error)
 }
 
-// EvaluateAccess looks up an executable and evaluates its assigned policy.
+// EvaluateAccess applies the child's allowlist and any assigned time policy.
 // A storage error is returned with the zero value of AccessDecision.
 func (r *Registry) EvaluateAccess(
 	store AccessStore,
 	sid, executable string,
 	at, breakStartedAt time.Time,
 ) (AccessDecision, error) {
+	if _, hasProfile := r.bySID[sid]; !hasProfile {
+		return AccessUnmanaged, nil
+	}
+
 	assignment, found := r.Match(sid, executable)
 	if !found {
-		return AccessUnmanaged, nil
+		return AccessNotAllowlisted, nil
+	}
+	if assignment.Policy == nil {
+		return AccessAllowed, nil
 	}
 
 	allowed, err := store.AllowsAppWithGrants(
 		assignment.ChildID,
 		assignment.AppID,
 		at,
-		assignment.Policy,
+		*assignment.Policy,
 		breakStartedAt,
 	)
 	if err != nil {

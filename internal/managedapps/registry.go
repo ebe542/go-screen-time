@@ -19,14 +19,14 @@ type ChildProfile struct {
 type App struct {
 	ID              string
 	ExecutablePaths []string
-	Policy          policy.AppAccessPolicy
+	Policy          *policy.AppAccessPolicy
 }
 
 // Assignment identifies the child and app that a policy applies to.
 type Assignment struct {
 	ChildID string
 	AppID   string
-	Policy  policy.AppAccessPolicy
+	Policy  *policy.AppAccessPolicy
 }
 
 // Registry looks up managed apps by Windows account SID and executable path.
