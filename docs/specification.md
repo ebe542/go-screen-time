@@ -26,9 +26,19 @@ With a 45-minute usage threshold and a 10-minute break, accumulate foreground us
 
 ## Bonus time
 
-Parents can add minutes directly or issue a one-time code scoped to a child and optionally an app. A shared grant increases the day's shared allowance. An app grant adds minutes usable only by that app, including after either daily limit is exhausted. Use these minutes only when the app would otherwise be blocked by a daily limit. Include that usage in actual usage totals and track bonus-funded minutes separately from regular budget consumption. Bonus time expires at local midnight and remains subject to the schedule and breaks.
+Parents can grant minutes immediately in the password-protected parent menu on the child's PC. Away from the PC, either parent can create a signed and encrypted one-time message on their phone and send it to the child through a messenger. The child pastes the message into the application on the target PC, which processes it offline.
 
-Give each code a defined expiry no later than the end of the policy day. Store a protected verifier, rate-limit failed attempts and redeem the code and grant the minutes in a single transaction. Bind redemption to the authenticated child account. Reusing a code, including in concurrent attempts, must yield at most one grant.
+A shared grant increases the day's shared allowance. An app grant adds minutes usable only by that app, including after either daily limit is exhausted. Use these minutes only when the app would otherwise be blocked by a daily limit. Include that usage in actual usage totals and track bonus-funded minutes separately from regular budget consumption. In either case, bonus time expires at local midnight of the day it is granted or redeemed. The schedule and break rules still apply.
+
+### One-time messages
+
+During one-time pairing, each parent's phone registers its public verification key on the child's PC and obtains the PC's public encryption key. The public keys can be transferred manually, for example by QR code or file. Each parent keeps their private signing key on their phone, and the PC keeps its private decryption key. Each parent can issue messages independently.
+
+The message contains a unique, random grant ID, the target PC, the child account, the requested bonus duration, an optional app ID and the redemption deadline. The phone signs the message and encrypts it for the target PC. The signed and encrypted message is the one-time code. The PC needs no pre-issued code record, code inventory or live connection to a parent's phone.
+
+On redemption, the PC decrypts the message, verifies the signature against a registered parent key and checks the target PC, the authenticated child account and the deadline. Rate-limit failed attempts. Store the grant ID and the bonus grant in the same transaction so repeated or concurrent submissions yield at most one grant, including after a restart. Re-encrypting the same grant preserves its ID. A new grant gets a new ID even when the other details match.
+
+The wire format, cryptographic library and pairing workflow are implementation decisions still to be made. The existing database-issued codes are an intermediate implementation. Offline message redemption is planned.
 
 ## Windows enforcement
 
@@ -52,7 +62,9 @@ Show parents daily totals per child and per app, with timestamps for recorded us
 | Exhaust an app cap while shared time remains | The matched app closes and relaunches are closed. Other apps permitted by policy remain usable. |
 | Exhaust the shared budget or reach the schedule end | With the shared budget exhausted, only managed apps with eligible app-specific bonus time can continue. At the schedule end, all covered apps close. The desktop and unmanaged apps remain usable. |
 | Run through a break threshold across two apps | Both apps are blocked for the configured break. A full break restores access when the other rules permit it. |
-| Grant minutes or redeem a code | Only the intended child receives the grant. Wrong-account, expired and repeated redemptions yield zero additional time. Hours and break rules still apply. |
+| Grant minutes in the parent menu | The selected child receives the chosen minutes immediately in the shared budget or for the selected app. Hours and break rules still apply. |
+| Redeem an encrypted message from either parent | The intended child can redeem a valid message on the target PC offline. Messages for another PC or account, expired or altered messages, and messages with an unregistered signer yield no grant. |
+| Replay a grant after redemption | Repeated and concurrent submissions, including a re-encrypted copy or a submission after restart, yield no additional time for the same grant ID. |
 | Switch between two child accounts | Each account sees its own totals and grants. The inactive session accrues no time. |
 | Cross midnight, a weekday/weekend boundary or a daylight-saving transition | Daily totals are attributed to the correct local date, the new allowance applies and elapsed usage is counted once. |
 | Lock, sleep, restart or lose the session helper | Charges stop during unobserved periods. Previously committed totals and grants survive, and monitoring gaps are visible. |

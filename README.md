@@ -7,7 +7,7 @@ A planned Go application that helps parents manage how long children use selecte
 - A shared daily budget for selected apps, with separate weekday and weekend settings.
 - Fixed hours for selected apps and individual daily limits per app or game.
 - Required breaks after a configurable amount of use.
-- Bonus minutes granted by a parent directly or redeemed with a one-time code.
+- Bonus minutes granted directly in the parent menu or redeemed offline from a signed, encrypted message sent by a parent.
 - Separate usage history and limits for each child's Windows account.
 - A password-protected parent menu for managing rules, granting time and reviewing usage.
 - Automatic closure of blocked apps and enforcement on subsequent launches.

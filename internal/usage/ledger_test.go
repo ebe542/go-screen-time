@@ -423,3 +423,167 @@ func TestLedgerAllowsAppUsesRecordedBudgetCharges(t *testing.T) {
 		t.Error("app B is blocked despite remaining shared time")
 	}
 }
+func TestLedgerAppliesSharedBonusToRecordingAndAccess(t *testing.T) {
+	ledger := NewLedger(time.UTC)
+	start := time.Date(2026, time.November, 27, 15, 0, 0, 0, time.UTC)
+	afterTen := start.Add(10 * time.Minute)
+	afterTwelve := start.Add(12 * time.Minute)
+	afterFifteen := start.Add(15 * time.Minute)
+
+	endOfDay, err := policy.NewTimeOfDay(24, 0)
+	if err != nil {
+		t.Fatalf("create end of day: %v", err)
+	}
+	window, err := policy.NewUsageWindow(policy.TimeOfDay{}, endOfDay)
+	if err != nil {
+		t.Fatalf("create usage window: %v", err)
+	}
+
+	appA := policy.AppAccessPolicy{
+		Schedule: policy.UsageSchedule{
+			WeekdayWindows: []policy.UsageWindow{window},
+		},
+		SharedBudget: policy.DailyBudget{WeekdayLimit: 10 * time.Minute},
+		AppLimit:     &policy.AppDailyLimit{Limit: 12 * time.Minute},
+	}
+	appB := appA
+	appB.AppLimit = nil
+
+	bonuses := AppBonuses{
+		Shared: SharedBonusAllowance{
+			Granted:   5 * time.Minute,
+			ExpiresAt: time.Date(2026, time.November, 28, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	noBreak := time.Time{}
+
+	ledger.RecordAppUsage("child-a", "app-a", start, afterTen, appA, bonuses)
+	if !ledger.AllowsAppWithBonuses("child-a", "app-a", afterTen, appA, noBreak, bonuses) {
+		t.Fatal("app A is blocked before it can use the shared bonus")
+	}
+
+	ledger.RecordAppUsage("child-a", "app-a", afterTen, afterTwelve, appA, bonuses)
+	if ledger.AllowsAppWithBonuses("child-a", "app-a", afterTwelve, appA, noBreak, bonuses) {
+		t.Error("app A is allowed after reaching its individual limit")
+	}
+	if !ledger.AllowsAppWithBonuses("child-a", "app-b", afterTwelve, appB, noBreak, bonuses) {
+		t.Fatal("app B is blocked despite three minutes of shared time remaining")
+	}
+
+	ledger.RecordAppUsage("child-a", "app-b", afterTwelve, afterFifteen, appB, bonuses)
+	if ledger.AllowsAppWithBonuses("child-a", "app-b", afterFifteen, appB, noBreak, bonuses) {
+		t.Error("app B is allowed after the shared budget and bonus are exhausted")
+	}
+
+	want := BudgetUsage{SharedRegular: 15 * time.Minute, AppRegular: 3 * time.Minute}
+	if got := ledger.BudgetTotals("child-a", "app-b", start); got != want {
+		t.Errorf("app B budget usage = %+v, want %+v", got, want)
+	}
+}
+func TestLedgerCombinesSharedAndAppBonuses(t *testing.T) {
+	ledger := NewLedger(time.UTC)
+	start := time.Date(2026, time.November, 27, 15, 0, 0, 0, time.UTC)
+	midnight := time.Date(2026, time.November, 28, 0, 0, 0, 0, time.UTC)
+
+	endOfDay, err := policy.NewTimeOfDay(24, 0)
+	if err != nil {
+		t.Fatalf("create end of day: %v", err)
+	}
+	window, err := policy.NewUsageWindow(policy.TimeOfDay{}, endOfDay)
+	if err != nil {
+		t.Fatalf("create usage window: %v", err)
+	}
+
+	appA := policy.AppAccessPolicy{
+		Schedule:     policy.UsageSchedule{WeekdayWindows: []policy.UsageWindow{window}},
+		SharedBudget: policy.DailyBudget{WeekdayLimit: 10 * time.Minute},
+		AppLimit:     &policy.AppDailyLimit{Limit: 12 * time.Minute},
+	}
+	appB := appA
+	appB.AppLimit = nil
+
+	bonuses := AppBonuses{
+		Shared: SharedBonusAllowance{Granted: 5 * time.Minute, ExpiresAt: midnight},
+		App:    AppBonusAllowance{AppID: "app-a", Granted: 3 * time.Minute, ExpiresAt: midnight},
+	}
+
+	afterA := start.Add(13 * time.Minute)
+	ledger.RecordAppUsage("child-a", "app-a", start, afterA, appA, bonuses)
+
+	wantA := BudgetUsage{
+		SharedRegular: 12 * time.Minute,
+		AppRegular:    12 * time.Minute,
+		AppBonus:      time.Minute,
+	}
+	if got := ledger.BudgetTotals("child-a", "app-a", afterA); got != wantA {
+		t.Errorf("app A usage = %+v, want %+v", got, wantA)
+	}
+
+	afterB := afterA.Add(3 * time.Minute)
+	ledger.RecordAppUsage("child-a", "app-b", afterA, afterB, appB, bonuses)
+
+	if ledger.AllowsAppWithBonuses("child-a", "app-b", afterB, appB, time.Time{}, bonuses) {
+		t.Error("app B is allowed after the shared time is exhausted")
+	}
+	if !ledger.AllowsAppWithBonuses("child-a", "app-a", afterB, appA, time.Time{}, bonuses) {
+		t.Fatal("app A is blocked despite two minutes of app bonus remaining")
+	}
+
+	end := afterB.Add(2 * time.Minute)
+	ledger.RecordAppUsage("child-a", "app-a", afterB, end, appA, bonuses)
+	if ledger.AllowsAppWithBonuses("child-a", "app-a", end, appA, time.Time{}, bonuses) {
+		t.Error("app A is allowed after its app bonus is exhausted")
+	}
+}
+func TestLedgerSharedBonusExpiresAtLocalMidnight(t *testing.T) {
+	local := time.FixedZone("UTC+1", 60*60)
+	ledger := NewLedger(local)
+	midnight := time.Date(2026, time.November, 28, 0, 0, 0, 0, local)
+	start := midnight.Add(-2 * time.Minute).UTC()
+	end := midnight.Add(2 * time.Minute).UTC()
+
+	endOfDay, err := policy.NewTimeOfDay(24, 0)
+	if err != nil {
+		t.Fatalf("create end of day: %v", err)
+	}
+	window, err := policy.NewUsageWindow(policy.TimeOfDay{}, endOfDay)
+	if err != nil {
+		t.Fatalf("create usage window: %v", err)
+	}
+
+	access := policy.AppAccessPolicy{
+		Schedule: policy.UsageSchedule{
+			WeekdayWindows: []policy.UsageWindow{window},
+			WeekendWindows: []policy.UsageWindow{window},
+		},
+	}
+	bonuses := AppBonuses{
+		Shared: SharedBonusAllowance{
+			Granted:   5 * time.Minute,
+			ExpiresAt: midnight,
+		},
+	}
+
+	ledger.RecordAppUsage("child-a", "app-a", start, midnight.UTC(), access, bonuses)
+
+	beforeMidnight := midnight.Add(-time.Second).UTC()
+	if !ledger.AllowsAppWithBonuses("child-a", "app-a", beforeMidnight, access, time.Time{}, bonuses) {
+		t.Error("app is blocked while Friday's shared bonus is still available")
+	}
+	if ledger.AllowsAppWithBonuses("child-a", "app-a", midnight.UTC(), access, time.Time{}, bonuses) {
+		t.Error("app is allowed at the shared bonus expiry")
+	}
+
+	ledger.RecordAppUsage("child-a", "app-a", midnight.UTC(), end, access, bonuses)
+
+	if got := ledger.BudgetTotals("child-a", "app-a", start).SharedRegular; got != 2*time.Minute {
+		t.Errorf("Friday shared usage = %s, want 2m", got)
+	}
+	if got := ledger.BudgetTotals("child-a", "app-a", end); got != (BudgetUsage{}) {
+		t.Errorf("Saturday budget usage = %+v, want zero charges", got)
+	}
+	shared, app := ledger.Totals("child-a", "app-a", end)
+	if shared != 2*time.Minute || app != 2*time.Minute {
+		t.Errorf("Saturday actual usage = (%s, %s), want (2m, 2m)", shared, app)
+	}
+}

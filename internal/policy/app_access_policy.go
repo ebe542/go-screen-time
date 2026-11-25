@@ -40,7 +40,7 @@ func (p AppAccessPolicy) AllowsWithBonus(
 		return false
 	}
 
-	limit := p.SharedBudget.limitFor(at)
+	limit := p.SharedBudget.LimitFor(at)
 	sharedAllows := sharedUsed < limit
 	bonusActive := at.Before(bonus.ExpiresAt)
 	if !sharedAllows && bonusActive && limit >= 0 {

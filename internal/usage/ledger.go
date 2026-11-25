@@ -1,12 +1,18 @@
 // Package usage tracks daily foreground usage for children and managed apps.
 package usage
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // Ledger stores daily usage totals in memory.
 type Ledger struct {
-	location *time.Location
-	days     map[dayKey]*dayTotals
+	location    *time.Location
+	days        map[dayKey]*dayTotals
+	bonusGrants map[bonusGrantKey][]bonusGrant
+	bonusMu     sync.RWMutex
+	bonusCodes  map[[32]byte]issuedBonusCode
 }
 
 type dayKey struct {
@@ -152,7 +158,7 @@ func remainingTime(limit, used time.Duration) time.Duration {
 
 // Record adds a foreground interval and splits it across local calendar days.
 func (l *Ledger) Record(childID, appID string, start, end time.Time) {
-	l.forEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
+	l.ForEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
 		l.addUsage(childID, appID, segmentStart, segmentEnd.Sub(segmentStart))
 	})
 }
@@ -164,19 +170,19 @@ func (l *Ledger) RecordAcrossDaysWithBudget(
 	start, end time.Time,
 	budgetAt func(at time.Time) (DailyLimits, AppBonusAllowance),
 ) {
-	l.forEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
+	l.ForEachDaySegment(start, end, func(segmentStart, segmentEnd time.Time) {
 		limits, bonus := budgetAt(segmentStart.In(l.location))
 		l.RecordWithBudget(childID, appID, segmentStart, segmentEnd, limits, bonus)
 	})
 }
 
-func (l *Ledger) forEachDaySegment(
+// ForEachDaySegment visits each non-empty part of an interval within one local day.
+func (l *Ledger) ForEachDaySegment(
 	start, end time.Time,
 	record func(start, end time.Time),
 ) {
 	for start.Before(end) {
-		year, month, day := start.In(l.location).Date()
-		midnight := time.Date(year, month, day+1, 0, 0, 0, 0, l.location)
+		midnight := l.NextMidnight(start)
 
 		segmentEnd := end
 		if midnight.After(start) && midnight.Before(end) {
@@ -186,4 +192,10 @@ func (l *Ledger) forEachDaySegment(
 		record(start, segmentEnd)
 		start = segmentEnd
 	}
+}
+
+// NextMidnight returns the next midnight in the policy time zone.
+func (l *Ledger) NextMidnight(at time.Time) time.Time {
+	year, month, day := at.In(l.location).Date()
+	return time.Date(year, month, day+1, 0, 0, 0, 0, l.location)
 }

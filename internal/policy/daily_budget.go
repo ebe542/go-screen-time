@@ -10,10 +10,11 @@ type DailyBudget struct {
 
 // Allows reports whether used is below the limit for at's local day.
 func (b DailyBudget) Allows(at time.Time, used time.Duration) bool {
-	return used < b.limitFor(at)
+	return used < b.LimitFor(at)
 }
 
-func (b DailyBudget) limitFor(at time.Time) time.Duration {
+// LimitFor returns the shared budget for the local day of at.
+func (b DailyBudget) LimitFor(at time.Time) time.Duration {
 	if at.Weekday() == time.Saturday || at.Weekday() == time.Sunday {
 		return b.WeekendLimit
 	}
