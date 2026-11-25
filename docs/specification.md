@@ -38,7 +38,9 @@ The message contains a unique, random grant ID, the target PC, the child account
 
 On redemption, the PC decrypts the message, verifies the signature against a registered parent key and checks the target PC, the authenticated child account and the deadline. Rate-limit failed attempts. Store the grant ID and the bonus grant in the same transaction so repeated or concurrent submissions yield at most one grant, including after a restart. Re-encrypting the same grant preserves its ID. A new grant gets a new ID even when the other details match.
 
-The wire format, cryptographic library and pairing workflow are implementation decisions still to be made. The existing database-issued codes are an intermediate implementation. Offline message redemption is planned.
+The tested Go core supports direct grants, issuance and offline redemption of signed and encrypted messages, and durable replay protection in SQLite. Messages use an ASCII-armored OpenPGP block with a versioned JSON payload. The implementation uses GopenPGP v3 with the RFC 9580 profile.
+
+The remaining work covers key pairing and private key storage, the parent and child interfaces, and an offline Windows test with two parent devices. The earlier database-issued code path remains available in the Go core. Its place in the user-facing workflow is undecided.
 
 ## Windows enforcement
 
