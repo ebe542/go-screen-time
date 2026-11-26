@@ -56,6 +56,22 @@ Prevent unlisted programs from launching under a child account. The Windows mech
 
 Run the service and protect its binaries, configuration and usage database so standard child accounts cannot modify them. Authenticate and authorize local clients using Windows identity and restrict each client's operations. The service owns timekeeping and policy state. Treat session reports as observations, validate process ownership and report a missing helper as degraded monitoring. Trackable time and launch detection can have gaps if monitoring fails or a game resists closure. Local administrators can control the installed service.
 
+### Foreground observation smoke test
+
+Run this test from Git Bash in an interactive Windows session. Start the session helper from the repository root.
+
+```bash
+go run ./cmd/projectctl check
+go run ./cmd/sessionhelper
+```
+
+1. Switch the foreground between two desktop applications. Each switch should produce a JSON line with status `foreground` and the complete executable path of the new foreground process.
+2. Keep one application in the foreground for more than five seconds. A confirmation should report the same executable path.
+3. Press **Win+L** to lock the session and then unlock it. Expect an `inactive` observation with an empty executable path at lock and a fresh foreground observation after unlock.
+4. Press **Ctrl+C**. The helper should return control to the terminal.
+
+The developer confirmed that the helper reports real foreground changes under Windows. The helper output verifies observation delivery. Usage booking and SQLite persistence require a separate integration test.
+
 ## Parent menu and usage history
 
 Grant parent access only to designated Windows accounts and require the parent password before exposing administrative operations. Store a salted password verifier, rate-limit attempts and expire inactive sessions. Authenticate administrative requests at the service boundary. Enrollment and recovery require a Windows administrator.
