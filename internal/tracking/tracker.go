@@ -43,6 +43,10 @@ type Tracker struct {
 
 	lastAt time.Time
 	active managedapps.Assignment
+
+	lastSID   string
+	idleSince time.Time
+	breaks    map[string]*childBreak
 }
 
 // NewTracker creates a tracker with the given maximum observation gap.
@@ -63,25 +67,48 @@ func (t *Tracker) Observe(observation Observation) error {
 	elapsed := observation.At.Sub(t.lastAt)
 	knownBoundary := observation.State == ObservationForeground ||
 		observation.State == ObservationInactive
+	continuous := knownBoundary && t.lastSID != "" && elapsed <= t.maxGap
 
-	if t.active.Policy != nil && knownBoundary && elapsed > 0 && elapsed <= t.maxGap {
-		err := t.store.RecordAppUsageWithGrants(
-			t.active.ChildID,
-			t.active.AppID,
-			t.lastAt,
-			observation.At,
-			*t.active.Policy,
-		)
-		if err != nil {
-			return err
+	if continuous && elapsed > 0 {
+		if t.active.Policy != nil {
+			err := t.store.RecordAppUsageWithGrants(
+				t.active.ChildID,
+				t.active.AppID,
+				t.lastAt,
+				observation.At,
+				*t.active.Policy,
+			)
+			if err != nil {
+				return err
+			}
+
+			if current := t.breaks[t.active.ChildID]; current != nil {
+				current.addUsage(t.lastAt, observation.At)
+			}
+		} else if current := t.breaks[t.lastSID]; current != nil {
+			current.state = current.rule.AfterIdle(
+				current.state, t.idleSince, observation.At,
+			)
 		}
 	}
 
-	t.lastAt = observation.At
-	t.active = managedapps.Assignment{}
+	var next managedapps.Assignment
 	if observation.State == ObservationForeground {
-		t.active, _ = t.registry.Match(observation.SID, observation.ExecutablePath)
+		next, _ = t.registry.Match(observation.SID, observation.ExecutablePath)
 	}
 
+	switch {
+	case !knownBoundary || next.Policy != nil:
+		t.idleSince = time.Time{}
+	case !continuous || t.lastSID != observation.SID || t.idleSince.IsZero():
+		t.idleSince = observation.At
+	}
+
+	t.lastAt = observation.At
+	t.lastSID = ""
+	if knownBoundary {
+		t.lastSID = observation.SID
+	}
+	t.active = next
 	return nil
 }
