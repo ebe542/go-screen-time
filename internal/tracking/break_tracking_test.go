@@ -1,11 +1,13 @@
 package tracking
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ebe542/go-screen-time/internal/managedapps"
 	"github.com/ebe542/go-screen-time/internal/policy"
+	"github.com/ebe542/go-screen-time/internal/storage/sqlite"
 )
 
 func TestTrackerStartsSharedBreakAcrossApps(t *testing.T) {
@@ -166,4 +168,79 @@ func (breakAccessStore) AllowsAppWithGrants(
 	breakStartedAt time.Time,
 ) (bool, error) {
 	return access.Allows(at, 0, 0, breakStartedAt), nil
+}
+
+func TestPersistentTrackerRestoresPartialUsageAndActiveBreak(t *testing.T) {
+	_, registry := newBreakTestTracker(t)
+	path := filepath.Join(t.TempDir(), "usage.db")
+	rule := policy.BreakRule{
+		After:    45 * time.Minute,
+		Duration: 10 * time.Minute,
+	}
+
+	open := func() (*Tracker, *sqlite.Ledger) {
+		t.Helper()
+
+		store, err := sqlite.Open(path, time.UTC)
+		if err != nil {
+			t.Fatalf("open SQLite ledger: %v", err)
+		}
+		tracker := NewPersistentTracker(registry, store, time.Hour)
+		tracker.SetBreakRule(childA, rule)
+		if err := tracker.RestoreBreakState(childA); err != nil {
+			_ = store.Close()
+			t.Fatalf("restore break state: %v", err)
+		}
+		return tracker, store
+	}
+
+	closeStore := func(store *sqlite.Ledger) {
+		t.Helper()
+		if err := store.Close(); err != nil {
+			t.Fatalf("close SQLite ledger: %v", err)
+		}
+	}
+
+	tracker, store := open()
+	observeBreakTest(t, tracker, 0, gameA)
+	observeBreakTest(t, tracker, 30, gameB)
+	closeStore(store)
+
+	tracker, store = open()
+	if got := tracker.BreakState(childA); got.Used != 30*time.Minute || !got.StartedAt.IsZero() {
+		_ = store.Close()
+		t.Fatalf("restored partial break state = %+v, want 30m and no active break", got)
+	}
+
+	observeBreakTest(t, tracker, 33, gameB)
+	observeBreakTest(t, tracker, 48, writer)
+	wantStart := trackingStart.Add(48 * time.Minute)
+	if got := tracker.BreakState(childA); got.Used != 45*time.Minute ||
+		!got.StartedAt.Equal(wantStart) {
+		t.Errorf("break state = %+v, want 45m and start at %v", got, wantStart)
+	}
+	closeStore(store)
+
+	tracker, store = open()
+	defer closeStore(store)
+
+	restored := tracker.BreakState(childA)
+	if !restored.StartedAt.Equal(wantStart) {
+		t.Fatalf("restored break start = %v, want %v", restored.StartedAt, wantStart)
+	}
+
+	tests := []struct {
+		at   time.Time
+		want managedapps.AccessDecision
+	}{
+		{wantStart.Add(10*time.Minute - time.Second), managedapps.AccessBlocked},
+		{wantStart.Add(10 * time.Minute), managedapps.AccessAllowed},
+	}
+	for _, tt := range tests {
+		got, err := registry.EvaluateAccess(store, childA, gameA, tt.at, restored.StartedAt)
+		if err != nil || got != tt.want {
+			t.Errorf("access at %v = (%q, %v), want (%q, nil)",
+				tt.at, got, err, tt.want)
+		}
+	}
 }

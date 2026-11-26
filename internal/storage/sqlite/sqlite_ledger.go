@@ -128,35 +128,45 @@ func (l *Ledger) RecordAppUsageWithGrants(
 	access policy.AppAccessPolicy,
 ) error {
 	return l.withTx(func(tx *sql.Tx) error {
-		calendar := usage.NewLedger(l.location)
-		var recordErr error
-
-		calendar.ForEachDaySegment(start, end, func(from, to time.Time) {
-			if recordErr != nil {
-				return
-			}
-			day, err := l.loadDay(tx, childID, from)
-			if err != nil {
-				recordErr = err
-				return
-			}
-
-			day.RecordAppUsageWithGrants(childID, appID, from, to, access)
-			_, actual := day.Totals(childID, appID, from)
-			charges := day.BudgetTotals(childID, appID, from)
-
-			_, recordErr = tx.Exec(`
-				INSERT INTO daily_usage (child_id, local_day, app_id, actual, regular, bonus)
-				VALUES (?, ?, ?, ?, ?, ?)
-				ON CONFLICT (child_id, local_day, app_id) DO UPDATE SET
-					actual = excluded.actual,
-					regular = excluded.regular,
-					bonus = excluded.bonus
-			`, childID, from.In(l.location).Format(time.DateOnly), appID,
-				int64(actual), int64(charges.AppRegular), int64(charges.AppBonus))
-		})
-		return recordErr
+		return l.recordAppUsage(tx, childID, appID, start, end, access)
 	})
+}
+
+func (l *Ledger) recordAppUsage(
+	tx *sql.Tx,
+	childID, appID string,
+	start, end time.Time,
+	access policy.AppAccessPolicy,
+) error {
+	calendar := usage.NewLedger(l.location)
+	var recordErr error
+
+	calendar.ForEachDaySegment(start, end, func(from, to time.Time) {
+		if recordErr != nil {
+			return
+		}
+
+		day, err := l.loadDay(tx, childID, from)
+		if err != nil {
+			recordErr = err
+			return
+		}
+
+		day.RecordAppUsageWithGrants(childID, appID, from, to, access)
+		_, actual := day.Totals(childID, appID, from)
+		charges := day.BudgetTotals(childID, appID, from)
+
+		_, recordErr = tx.Exec(`
+			INSERT INTO daily_usage (child_id, local_day, app_id, actual, regular, bonus)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (child_id, local_day, app_id) DO UPDATE SET
+				actual = excluded.actual,
+				regular = excluded.regular,
+				bonus = excluded.bonus
+		`, childID, from.In(l.location).Format(time.DateOnly), appID,
+			int64(actual), int64(charges.AppRegular), int64(charges.AppBonus))
+	})
+	return recordErr
 }
 
 func (l *Ledger) loadDay(tx *sql.Tx, childID string, at time.Time) (*usage.Ledger, error) {

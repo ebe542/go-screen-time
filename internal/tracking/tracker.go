@@ -47,6 +47,8 @@ type Tracker struct {
 	lastSID   string
 	idleSince time.Time
 	breaks    map[string]*childBreak
+
+	breakStore BreakStateStore
 }
 
 // NewTracker creates a tracker with the given maximum observation gap.
@@ -71,24 +73,11 @@ func (t *Tracker) Observe(observation Observation) error {
 
 	if continuous && elapsed > 0 {
 		if t.active.Policy != nil {
-			err := t.store.RecordAppUsageWithGrants(
-				t.active.ChildID,
-				t.active.AppID,
-				t.lastAt,
-				observation.At,
-				*t.active.Policy,
-			)
-			if err != nil {
+			if err := t.recordCurrentUsage(observation.At); err != nil {
 				return err
 			}
-
-			if current := t.breaks[t.active.ChildID]; current != nil {
-				current.addUsage(t.lastAt, observation.At)
-			}
-		} else if current := t.breaks[t.lastSID]; current != nil {
-			current.state = current.rule.AfterIdle(
-				current.state, t.idleSince, observation.At,
-			)
+		} else if err := t.recordBreakIdle(observation.At); err != nil {
+			return err
 		}
 	}
 

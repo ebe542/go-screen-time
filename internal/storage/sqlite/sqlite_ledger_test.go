@@ -409,3 +409,68 @@ func TestSQLiteLedgerRedeemsVerifiedBonusOnceAcrossConnections(t *testing.T) {
 		t.Errorf("shared bonus = %s, want 1m", got)
 	}
 }
+func TestSQLiteLedgerRollsBackUsageWhenBreakStateWriteFails(t *testing.T) {
+	store := mustOpenSQLiteLedger(t, filepath.Join(t.TempDir(), "usage.db"), time.UTC)
+	defer store.Close()
+
+	const childID = "child-a"
+	const appID = "app-a"
+	start := sqliteTestTime()
+	end := start.Add(15 * time.Minute)
+
+	access := sqliteTestAccessPolicy(t)
+	access.SharedBudget.WeekdayLimit = time.Hour
+	state := policy.BreakState{
+		Used:      15 * time.Minute,
+		StartedAt: end,
+	}
+
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER reject_break_state_write
+		BEFORE INSERT ON break_states
+		BEGIN
+			SELECT RAISE(ABORT, 'test break state write failure');
+		END
+	`); err != nil {
+		t.Fatalf("install break state failure trigger: %v", err)
+	}
+
+	err := store.RecordAppUsageAndBreakState(childID, appID, start, end, access, state)
+	if err == nil {
+		t.Error("booking succeeded despite a failed break state write")
+	}
+	charges, err := store.BudgetTotals(childID, appID, start)
+	if err != nil {
+		t.Fatalf("read budget totals: %v", err)
+	}
+	if charges != (usage.BudgetUsage{}) {
+		t.Errorf("charges after failed write = %+v, want zero charges", charges)
+	}
+	saved, err := store.LoadBreakState(childID)
+	if err != nil || saved != (policy.BreakState{}) {
+		t.Errorf("state after failed write = (%+v, %v), want zero state", saved, err)
+	}
+
+	if _, err := store.db.Exec("DROP TRIGGER reject_break_state_write"); err != nil {
+		t.Fatalf("remove failure trigger: %v", err)
+	}
+	if err := store.RecordAppUsageAndBreakState(childID, appID, start, end, access, state); err != nil {
+		t.Fatalf("retry the same booking: %v", err)
+	}
+
+	charges, err = store.BudgetTotals(childID, appID, start)
+	if err != nil {
+		t.Fatalf("read retried budget totals: %v", err)
+	}
+	want := usage.BudgetUsage{
+		SharedRegular: 15 * time.Minute,
+		AppRegular:    15 * time.Minute,
+	}
+	if charges != want {
+		t.Errorf("charges after retry = %+v, want %+v", charges, want)
+	}
+	saved, err = store.LoadBreakState(childID)
+	if err != nil || saved.Used != state.Used || !saved.StartedAt.Equal(state.StartedAt) {
+		t.Errorf("state after retry = (%+v, %v), want %+v", saved, err, state)
+	}
+}

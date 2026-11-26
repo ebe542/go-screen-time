@@ -30,4 +30,12 @@ type Store interface {
 	// RedeemBonusMessageAttempt applies the child's attempt limit and credits
 	// a verified grant atomically. A nil grant records a failed verification.
 	RedeemBonusMessageAttempt(childID string, at time.Time, grant *VerifiedBonusGrant) error
+	LoadBreakState(childID string) (policy.BreakState, error)
+	SaveBreakState(childID string, state policy.BreakState) error
+	RecordAppUsageAndBreakState(
+		childID, appID string,
+		start, end time.Time,
+		access policy.AppAccessPolicy,
+		state policy.BreakState,
+	) error
 }
