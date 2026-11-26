@@ -70,7 +70,27 @@ go run ./cmd/sessionhelper
 3. Press **Win+L** to lock the session and then unlock it. Expect an `inactive` observation with an empty executable path at lock and a fresh foreground observation after unlock.
 4. Press **Ctrl+C**. The helper should return control to the terminal.
 
-The developer confirmed that the helper reports real foreground changes under Windows. The helper output verifies observation delivery. Usage booking and SQLite persistence require a separate integration test.
+The developer confirmed that the helper reports real foreground changes under Windows.
+
+### Foreground usage and SQLite smoke test
+
+Use the full executable paths from the observation output. Start the helper in recording mode with a fresh database path.
+
+```bash
+test_dir=$(mktemp -d)
+test_db=$(cygpath -w "$test_dir/foreground-test.db")
+
+go run ./cmd/sessionhelper \
+  -record-db "$test_db" \
+  -timed-exe 'C:\Path\To\TimedApp.exe' \
+  -unrestricted-exe 'C:\Path\To\UnrestrictedApp.exe'
+```
+
+The first run creates the database and applies the embedded migrations. Watch the `media_usage` field. It increases while the time-limited app is in the foreground. Switching to the unrestricted app books the final time-limited interval, then the total stays steady. Locking the session closes the current interval at the observed boundary. The time spent locked is excluded from the total.
+
+Stop the helper with **Ctrl+C** and rerun the same `go run` command on the same local policy day, using the same database path. The first observation shows the persisted total. Time between the two runs remains unbooked.
+
+The developer confirmed the Windows recording test, including the app switch, session lock and restart with the same SQLite database. Recording mode provides a diagnostic path. Windows service integration and runtime enforcement remain planned.
 
 ## Parent menu and usage history
 

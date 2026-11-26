@@ -5,15 +5,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/ebe542/go-screen-time/internal/sessionobserver"
 	"github.com/ebe542/go-screen-time/internal/tracking"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	dbPath := flag.String("record-db", "", "SQLite file for the foreground usage test")
+	timedPath := flag.String("timed-exe", "", "full path of the time-limited test executable")
+	unrestrictedPath := flag.String("unrestricted-exe", "", "full path of the unrestricted test executable")
+	flag.Parse()
+
+	var diagnostic *usageDiagnostic
+	if *dbPath != "" || *timedPath != "" || *unrestrictedPath != "" {
+		var err error
+		diagnostic, err = newUsageDiagnostic(*dbPath, *timedPath, *unrestrictedPath, time.Local)
+		if err != nil {
+			return err
+		}
+		defer diagnostic.Close()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -25,17 +48,30 @@ func main() {
 		if readErr != nil {
 			log.Printf("foreground observation: %v", readErr)
 		}
-		return output.Encode(struct {
+
+		line := struct {
 			tracking.Observation
-			Status string `json:"status"`
+			Status     string `json:"status"`
+			MediaUsage string `json:"media_usage,omitempty"`
 		}{
 			Observation: observation,
 			Status:      statusName(observation.State),
-		})
+		}
+
+		if diagnostic != nil {
+			used, err := diagnostic.Observe(observation)
+			if err != nil {
+				return err
+			}
+			line.MediaUsage = used.String()
+		}
+
+		return output.Encode(line)
 	})
-	if err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatal(err)
+	if errors.Is(err, context.Canceled) {
+		return nil
 	}
+	return err
 }
 
 func statusName(state tracking.ObservationState) string {
