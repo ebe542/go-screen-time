@@ -3,6 +3,7 @@ module github.com/ebe542/go-screen-time
 go 1.26.6
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/ProtonMail/gopenpgp/v3 v3.5.2
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.56.0

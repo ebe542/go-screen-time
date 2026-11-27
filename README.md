@@ -22,6 +22,10 @@ The project is at the design stage. The [specification](docs/specification.md) d
 - Git Bash on Windows for the documented commands
 - VS Code with the official Go extension is recommended
 
+## Configure the console service
+
+Use the [child profile JSON reference](docs/specification.md#console-service-configuration) to create a configuration file for `screentimed -config`.
+
 ## Verify a milestone
 
 Run the standard checks:

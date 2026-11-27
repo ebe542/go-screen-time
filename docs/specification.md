@@ -90,7 +90,89 @@ The first run creates the database and applies the embedded migrations. Watch th
 
 Stop the helper with **Ctrl+C** and rerun the same `go run` command on the same local policy day, using the same database path. The first observation shows the persisted total. Time between the two runs remains unbooked.
 
-The developer confirmed the Windows recording test, including the app switch, session lock and restart with the same SQLite database. Recording mode provides a diagnostic path. Windows service integration and runtime enforcement remain planned.
+The developer confirmed the Windows recording test, including the app switch, session lock and restart with the same SQLite database. Recording mode provides a diagnostic path.
+
+### Console service configuration
+
+Pass the profile JSON file to `screentimed` with `-config`. The filename is arbitrary. The examples use `profiles.json`. The console service uses the Windows local time zone for schedules and daily totals.
+
+Get the SID from Git Bash running under the Windows account the profile applies to.
+
+```bash
+MSYS2_ARG_CONV_EXCL='*' whoami.exe /user
+```
+
+```json
+{
+  "children": [
+    {
+      "sid": "S-1-5-21-100-200-300-1001",
+      "daily_budget": {
+        "weekday_minutes": 120,
+        "weekend_minutes": 180
+      },
+      "break": {
+        "after_minutes": 45,
+        "duration_minutes": 10
+      },
+      "apps": [
+        {
+          "id": "example-game",
+          "executable_paths": [
+            "C:\\Games\\Example\\game.exe",
+            "C:\\Games\\Example\\launcher.exe"
+          ],
+          "policy": {
+            "weekday_windows": [{"start": "14:00", "end": "19:00"}],
+            "weekend_windows": [{"start": "10:00", "end": "19:00"}],
+            "app_limit_minutes": 60
+          }
+        },
+        {
+          "id": "school-writer",
+          "executable_paths": ["C:\\School\\writer.exe"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `children` | Required array of child profiles. Each profile uses a distinct Windows account SID. |
+| `daily_budget` | Required when an app has a `policy`. Both weekday and weekend allowances are required and use non-negative whole minutes. |
+| `break` | Optional. When present, both the usage threshold and the break duration must be positive whole minutes. |
+| `apps` | Program allowlist. Each entry has a unique ID within the profile and at least one absolute executable path. Multiple paths on one entry share its usage totals. An empty list allows no programs covered by the allowlist. |
+| `policy` | Omit this field for an unrestricted app. With a policy, an empty or omitted window list means the app is unavailable on those days. |
+| `app_limit_minutes` | Optional individual daily cap. Omit it to use the shared budget without an individual cap. A value of zero blocks usage under the regular app allowance. |
+
+Use `HH:MM` for window boundaries. The start is inclusive and the end is exclusive. Use `00:00` to `24:00` for an all-day window. Split a window that crosses midnight into separate windows on each side of the day boundary. Double backslashes in JSON paths. The loader rejects unknown fields and ambiguous executable assignments. Website entries are planned.
+
+### Console service and named pipe smoke test
+
+Run both commands from Git Bash in the active Windows console session. Use a separate SQLite database and a JSON profile for the current account SID. Configure one media app with an all-day window and a one-minute app limit. Set the shared weekday and weekend budgets above one minute. Add a school app without a `policy` field and leave a third app off the allowlist. Use the full executable paths from the observation output, with JSON escaping for backslashes.
+
+Start the service in the first terminal.
+
+```bash
+go run ./cmd/screentimed \
+  -config 'C:\Path\To\profiles.json' \
+  -db 'C:\Path\To\usage.db'
+```
+
+Start the helper in the second terminal.
+
+```bash
+go run ./cmd/sessionhelper -pipe '\\.\pipe\go-screen-time-observations'
+```
+
+1. Keep the media app in the foreground until its limit is reached. The service should report `allowed` followed by `blocked`.
+2. Switch to the school app and then to the third app. Expect `allowed` for the school app and `not_allowlisted` for the third app.
+3. Stop and restart the helper. The service should report the old connection closing and assign a new connection ID.
+4. Stop and restart both programs on the same local day with the same SQLite database. The media app should still be blocked on the first observation.
+
+The developer confirmed this two-terminal test on Windows. The console service logs access decisions. Windows Service Control Manager registration and runtime enforcement remain planned.
 
 ## Parent menu and usage history
 
