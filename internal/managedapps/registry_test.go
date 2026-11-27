@@ -116,3 +116,43 @@ func TestNewRegistryRejectsNonAbsoluteExecutablePaths(t *testing.T) {
 		})
 	}
 }
+func TestRegistryUsesChildBreakRuleForEachTimedApp(t *testing.T) {
+	rule := policy.BreakRule{After: 45 * time.Minute, Duration: 10 * time.Minute}
+	firstOldRule := policy.BreakRule{After: 30 * time.Minute, Duration: 5 * time.Minute}
+	secondOldRule := policy.BreakRule{After: time.Hour, Duration: 15 * time.Minute}
+
+	firstPolicy := &policy.AppAccessPolicy{BreakRule: firstOldRule}
+	secondPolicy := &policy.AppAccessPolicy{BreakRule: secondOldRule}
+	const writerPath = `C:\School\writer.exe`
+
+	registry, err := NewRegistry([]ChildProfile{{
+		SID:       childASID,
+		BreakRule: rule,
+		Apps: []App{
+			{ID: "game", ExecutablePaths: []string{gamePath}, Policy: firstPolicy},
+			{ID: "launcher", ExecutablePaths: []string{launcherPath}, Policy: secondPolicy},
+			{ID: "writer", ExecutablePaths: []string{writerPath}},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+
+	for _, executable := range []string{gamePath, launcherPath} {
+		got, found := registry.Match(childASID, executable)
+		if !found || got.Policy == nil {
+			t.Fatalf("timed app %q did not match", executable)
+		}
+		if got.Policy.BreakRule != rule {
+			t.Errorf("break rule for %q = %+v, want %+v", executable, got.Policy.BreakRule, rule)
+		}
+	}
+
+	writer, found := registry.Match(childASID, writerPath)
+	if !found || writer.Policy != nil {
+		t.Errorf("writer = (%+v, %t), want an unrestricted entry", writer, found)
+	}
+	if firstPolicy.BreakRule != firstOldRule || secondPolicy.BreakRule != secondOldRule {
+		t.Error("building the registry modified the supplied app policies")
+	}
+}

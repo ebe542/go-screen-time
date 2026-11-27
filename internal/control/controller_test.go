@@ -22,7 +22,7 @@ const (
 var start = time.Date(2026, time.November, 27, 15, 0, 0, 0, time.UTC)
 
 func TestControllerBooksBeforeDecidingAccessAndRestoresBreak(t *testing.T) {
-	registry, rules := testControllerConfig(t)
+	registry := testControllerConfig(t)
 	path := filepath.Join(t.TempDir(), "usage.db")
 
 	store := openControllerStore(t, path)
@@ -32,7 +32,7 @@ func TestControllerBooksBeforeDecidingAccessAndRestoresBreak(t *testing.T) {
 		}
 	}()
 
-	controller, err := NewController(registry, store, time.Hour, rules)
+	controller, err := NewController(registry, store, time.Hour)
 	if err != nil {
 		t.Fatalf("create controller: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestControllerBooksBeforeDecidingAccessAndRestoresBreak(t *testing.T) {
 	store = nil
 
 	store = openControllerStore(t, path)
-	controller, err = NewController(registry, store, time.Hour, rules)
+	controller, err = NewController(registry, store, time.Hour)
 	if err != nil {
 		t.Fatalf("restart controller: %v", err)
 	}
@@ -59,13 +59,13 @@ func TestControllerBooksBeforeDecidingAccessAndRestoresBreak(t *testing.T) {
 }
 
 func TestControllerSkipsAccessCheckWhenUsageBookingFails(t *testing.T) {
-	registry, rules := testControllerConfig(t)
+	registry := testControllerConfig(t)
 	ledger := openControllerStore(t, filepath.Join(t.TempDir(), "usage.db"))
 	defer ledger.Close()
 
 	writeErr := errors.New("usage booking failed")
 	store := &failingControllerStore{Ledger: ledger, writeErr: writeErr}
-	controller, err := NewController(registry, store, time.Hour, rules)
+	controller, err := NewController(registry, store, time.Hour)
 	if err != nil {
 		t.Fatalf("create controller: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestControllerSkipsAccessCheckWhenUsageBookingFails(t *testing.T) {
 	}
 }
 
-func testControllerConfig(t *testing.T) (*managedapps.Registry, map[string]policy.BreakRule) {
+func testControllerConfig(t *testing.T) *managedapps.Registry {
 	t.Helper()
 
 	endOfDay, err := policy.NewTimeOfDay(24, 0)
@@ -106,10 +106,10 @@ func testControllerConfig(t *testing.T) (*managedapps.Registry, map[string]polic
 	timed := &policy.AppAccessPolicy{
 		Schedule:     policy.UsageSchedule{WeekdayWindows: []policy.UsageWindow{window}},
 		SharedBudget: policy.DailyBudget{WeekdayLimit: 2 * time.Hour},
-		BreakRule:    rule,
 	}
 	registry, err := managedapps.NewRegistry([]managedapps.ChildProfile{{
-		SID: childSID,
+		SID:       childSID,
+		BreakRule: rule,
 		Apps: []managedapps.App{
 			{ID: "game-a", ExecutablePaths: []string{gameA}, Policy: timed},
 			{ID: "game-b", ExecutablePaths: []string{gameB}, Policy: timed},
@@ -119,7 +119,7 @@ func testControllerConfig(t *testing.T) (*managedapps.Registry, map[string]polic
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
 	}
-	return registry, map[string]policy.BreakRule{childSID: rule}
+	return registry
 }
 
 func openControllerStore(t *testing.T, path string) *sqlite.Ledger {
@@ -183,4 +183,45 @@ func (s *failingControllerStore) AllowsAppWithGrants(
 ) (bool, error) {
 	s.accessChecks++
 	return s.Ledger.AllowsAppWithGrants(childID, appID, at, access, breakStartedAt)
+}
+func TestControllerIgnoresStaleObservationAfterAppSwitch(t *testing.T) {
+	registry := testControllerConfig(t)
+	ledger := openControllerStore(t, filepath.Join(t.TempDir(), "usage.db"))
+	defer ledger.Close()
+
+	store := &failingControllerStore{Ledger: ledger}
+	controller, err := NewController(registry, store, time.Hour)
+	if err != nil {
+		t.Fatalf("create controller: %v", err)
+	}
+
+	assertControllerDecision(t, controller, 0, gameA, managedapps.AccessAllowed)
+	assertControllerDecision(t, controller, 20, gameB, managedapps.AccessAllowed)
+
+	checksBefore := store.accessChecks
+	got, err := controller.Process(foregroundObservation(10, gameA))
+	if err != nil || got != "" {
+		t.Errorf("stale observation = (%q, %v), want no decision", got, err)
+	}
+	if store.accessChecks != checksBefore {
+		t.Errorf("stale observation caused an access check")
+	}
+
+	assertControllerDecision(t, controller, 25, writer, managedapps.AccessAllowed)
+
+	gameAUsage, err := ledger.BudgetTotals(childSID, "game-a", start)
+	if err != nil {
+		t.Fatalf("read game A usage: %v", err)
+	}
+	gameBUsage, err := ledger.BudgetTotals(childSID, "game-b", start)
+	if err != nil {
+		t.Fatalf("read game B usage: %v", err)
+	}
+
+	if gameAUsage.AppRegular != 20*time.Minute ||
+		gameBUsage.AppRegular != 5*time.Minute ||
+		gameBUsage.SharedRegular != 25*time.Minute {
+		t.Errorf("usage after stale observation = (A %+v, B %+v), want 20m + 5m",
+			gameAUsage, gameBUsage)
+	}
 }

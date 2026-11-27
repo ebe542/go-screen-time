@@ -3,6 +3,7 @@ package managedapps
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 
 // ChildProfile lists the managed apps for a Windows account.
 type ChildProfile struct {
-	SID  string
-	Apps []App
+	SID       string
+	Apps      []App
+	BreakRule policy.BreakRule
 }
 
 // App groups executable paths that share a stable ID and an access policy.
@@ -31,12 +33,16 @@ type Assignment struct {
 
 // Registry looks up managed apps by Windows account SID and executable path.
 type Registry struct {
-	bySID map[string]map[string]Assignment
+	bySID      map[string]map[string]Assignment
+	breakRules map[string]policy.BreakRule
 }
 
 // NewRegistry builds a registry and rejects ambiguous profile assignments.
 func NewRegistry(profiles []ChildProfile) (*Registry, error) {
-	registry := &Registry{bySID: make(map[string]map[string]Assignment, len(profiles))}
+	registry := &Registry{
+		bySID:      make(map[string]map[string]Assignment, len(profiles)),
+		breakRules: make(map[string]policy.BreakRule, len(profiles)),
+	}
 
 	for _, profile := range profiles {
 		if strings.TrimSpace(profile.SID) == "" {
@@ -60,7 +66,11 @@ func NewRegistry(profiles []ChildProfile) (*Registry, error) {
 			assignment := Assignment{
 				ChildID: profile.SID,
 				AppID:   app.ID,
-				Policy:  app.Policy,
+			}
+			if app.Policy != nil {
+				configured := *app.Policy
+				configured.BreakRule = profile.BreakRule
+				assignment.Policy = &configured
 			}
 			for _, executable := range app.ExecutablePaths {
 				key, ok := executableKey(executable)
@@ -76,6 +86,7 @@ func NewRegistry(profiles []ChildProfile) (*Registry, error) {
 			}
 		}
 		registry.bySID[profile.SID] = byPath
+		registry.breakRules[profile.SID] = profile.BreakRule
 	}
 
 	return registry, nil
@@ -103,4 +114,9 @@ func executableKey(executable string) (string, bool) {
 		return "", false
 	}
 	return executable[:2] + cleaned, true
+}
+
+// BreakRules returns a copy of the configured child break rules.
+func (r *Registry) BreakRules() map[string]policy.BreakRule {
+	return maps.Clone(r.breakRules)
 }

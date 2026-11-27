@@ -117,11 +117,11 @@ func newBreakTestTracker(t *testing.T) (*Tracker, *managedapps.Registry) {
 	timed := &policy.AppAccessPolicy{
 		Schedule:     policy.UsageSchedule{WeekdayWindows: []policy.UsageWindow{window}},
 		SharedBudget: policy.DailyBudget{WeekdayLimit: 2 * time.Hour},
-		BreakRule:    rule,
 	}
 	registry, err := managedapps.NewRegistry([]managedapps.ChildProfile{
 		{
-			SID: childA,
+			SID:       childA,
+			BreakRule: rule,
 			Apps: []managedapps.App{
 				{ID: "game-a", ExecutablePaths: []string{gameA}, Policy: timed},
 				{ID: "game-b", ExecutablePaths: []string{gameB}, Policy: timed},
