@@ -20,6 +20,7 @@ The project is at the design stage. The [specification](docs/specification.md) d
 - Go 1.26.6 or newer within the Go 1.26 release line
 - Git
 - Git Bash on Windows for the documented commands
+- Administrator PowerShell for Windows service registration and file permissions
 - VS Code with the official Go extension is recommended
 
 ## Configure the console service

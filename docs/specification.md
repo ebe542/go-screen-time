@@ -172,7 +172,32 @@ go run ./cmd/sessionhelper -pipe '\\.\pipe\go-screen-time-observations'
 3. Stop and restart the helper. The service should report the old connection closing and assign a new connection ID.
 4. Stop and restart both programs on the same local day with the same SQLite database. The media app should still be blocked on the first observation.
 
-The developer confirmed this two-terminal test on Windows. The console service logs access decisions. Windows Service Control Manager registration and runtime enforcement remain planned.
+The developer confirmed this two-terminal test on Windows. The console service logs access decisions.
+
+### Registered Windows service smoke test
+
+Use Git Bash for the Go build and to run the session helper. Use an elevated PowerShell for service registration, file permissions, and service control.
+
+```bash
+go build -o ./screentimed.exe ./cmd/screentimed
+```
+
+Prepare a fresh test directory under `ProgramData`. Give administrators and SYSTEM full access. Give LocalService read and execute access to the directory containing the executable and profile JSON, and modify access to a separate database directory. The child account must lack write access to the executable, configuration and database. Use the one-minute media app profile from the console smoke test.
+
+In the elevated PowerShell, set `$exe`, `$config` and `$db` to the absolute paths in the test directory. Stop any console instance before starting the registered service. Use a free service name matching the name expected by the executable.
+
+```powershell
+$imagePath = '"{0}" -config "{1}" -db "{2}"' -f $exe, $config, $db
+New-Service -Name GoScreenTime -BinaryPathName $imagePath -StartupType Manual -ErrorAction Stop
+sc.exe config GoScreenTime obj= 'NT AUTHORITY\LocalService'
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure LocalService' }
+Start-Service -Name GoScreenTime -ErrorAction Stop
+Get-Service -Name GoScreenTime
+```
+
+Expect `Running`. Connect the helper from Git Bash under the test account and leave the time-limited app in the foreground for at least 70 seconds. Stop the helper, then use `Stop-Service -Name GoScreenTime` and verify `Stopped` with `Get-Service`. Restart the service to check that it returns to `Running`.
+
+To inspect the persisted decision in the same local day, stop the registered service again and run `& $exe -config $config -db $db` from the elevated PowerShell. Reconnect the helper and bring the media app to the foreground. Expect `blocked` on its first observation. The developer reported that the media app remained blocked after the limit was reached. Actual app closure and launch prevention remain planned.
 
 ## Parent menu and usage history
 

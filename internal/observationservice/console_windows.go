@@ -16,12 +16,13 @@ import (
 
 const maximumObservationGap = 15 * time.Second
 
-// RunConsole loads the child profiles and starts the local observation service.
-func RunConsole(
+// RunWithReadiness starts observation processing and reports when the pipe is open.
+func RunWithReadiness(
 	ctx context.Context,
 	configPath, dbPath, pipeName string,
 	location *time.Location,
 	report func(Report),
+	ready func(),
 ) error {
 	config, err := os.Open(configPath)
 	if err != nil {
@@ -52,8 +53,24 @@ func RunConsole(
 	}
 	defer listener.Close()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if ready != nil {
+		ready()
+	}
 	return Serve(ctx, listener, control.NewObservationIntake(controller),
 		activeConsoleSession, time.Now, report)
+}
+
+// RunConsole loads the child profiles and starts the local observation service.
+func RunConsole(
+	ctx context.Context,
+	configPath, dbPath, pipeName string,
+	location *time.Location,
+	report func(Report),
+) error {
+	return RunWithReadiness(ctx, configPath, dbPath, pipeName, location, report, nil)
 }
 
 func activeConsoleSession() (string, error) {

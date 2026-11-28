@@ -45,29 +45,31 @@ func TestRunConsoleUsesWindowsConsoleIdentity(t *testing.T) {
 
 	reports := make(chan Report, 4)
 	done := make(chan error, 1)
+	ready := make(chan struct{})
+
 	go func() {
-		done <- RunConsole(ctx, configPath, dbPath, pipeName, time.UTC, func(report Report) {
-			reports <- report
-		})
+		done <- RunWithReadiness(
+			ctx, configPath, dbPath, pipeName, time.UTC,
+			func(report Report) { reports <- report },
+			func() { close(ready) },
+		)
 	}()
 
-	var sender *observationpipe.Sender
-	for sender == nil {
-		var err error
-		sender, err = observationpipe.Dial(ctx, pipeName)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
-			t.Fatalf("dial console pipe: %v", err)
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("console stopped before accepting a connection: %v", err)
-		case <-ctx.Done():
-			t.Fatalf("wait for console pipe: %v", ctx.Err())
-		case <-time.After(20 * time.Millisecond):
-		}
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("service stopped before readiness: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("wait for service readiness: %v", ctx.Err())
+	}
+
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("service reported readiness before creating the database: %v", err)
+	}
+
+	sender, err := observationpipe.Dial(ctx, pipeName)
+	if err != nil {
+		t.Fatalf("connect to pipe after readiness: %v", err)
 	}
 	defer sender.Close()
 
@@ -113,8 +115,15 @@ func TestRunConsoleRejectsInvalidConfigBeforeOpeningDatabase(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	err := RunConsole(ctx, configPath, dbPath,
-		`\\.\pipe\go-screen-time-invalid-config-test`, time.UTC, nil)
+	ready := false
+	err := RunWithReadiness(
+		ctx, configPath, dbPath,
+		`\\.\pipe\go-screen-time-invalid-config-test`, time.UTC, nil,
+		func() { ready = true },
+	)
+	if ready {
+		t.Error("service reported readiness for invalid profiles")
+	}
 	if err == nil || errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("RunConsole error = %v, want a configuration error", err)
 	}
